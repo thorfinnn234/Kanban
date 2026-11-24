@@ -101,6 +101,46 @@ app.post("/columns/:id/cards", async (req, res) => {
   res.status(201).json(card);
 });
 
+// Move a card to a new column and/or position. The client works out the
+// position (a midpoint between its new neighbours), so only this card changes.
+app.patch("/cards/:id/move", async (req, res) => {
+  const toColumnId: unknown = req.body?.toColumnId;
+  const position: unknown = req.body?.position;
+  if (typeof toColumnId !== "string" || toColumnId === "") {
+    res.status(400).json({ error: "toColumnId is required" });
+    return;
+  }
+  // Number.isFinite also rejects NaN and huge values that parse to Infinity.
+  if (typeof position !== "number" || !Number.isFinite(position) || position <= 0) {
+    res.status(400).json({ error: "position must be a positive number" });
+    return;
+  }
+
+  const card = await db.card.findUnique({
+    where: { id: req.params.id },
+    include: { column: true },
+  });
+  if (!card) {
+    res.status(404).json({ error: "Card not found" });
+    return;
+  }
+  const toColumn = await db.column.findUnique({ where: { id: toColumnId } });
+  if (!toColumn) {
+    res.status(404).json({ error: "Column not found" });
+    return;
+  }
+  if (toColumn.boardId !== card.column.boardId) {
+    res.status(400).json({ error: "Cards can't be moved to another board" });
+    return;
+  }
+
+  const updated = await db.card.update({
+    where: { id: card.id },
+    data: { columnId: toColumn.id, position },
+  });
+  res.json(updated);
+});
+
 // Error handler: Express recognises it by its 4 arguments. In Express 5, an
 // error thrown inside an async route lands here automatically.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

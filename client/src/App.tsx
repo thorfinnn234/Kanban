@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import * as api from './api'
 import Board from './components/Board'
-import type { Board as BoardType } from './types'
+import { findCard, positionBetween, putCard } from './positions'
+import type { Board as BoardType, Column as ColumnType } from './types'
 
 // The screen is always in exactly one of these states, which is easier to
 // reason about than separate `loading`, `error` and `board` variables.
@@ -21,6 +22,7 @@ async function loadFirstBoard(): Promise<State> {
 
 export default function App() {
   const [state, setState] = useState<State>({ status: 'loading' })
+  const [moveError, setMoveError] = useState<string | null>(null)
 
   // Used by "Try again" and after creating the first board.
   function load() {
@@ -79,6 +81,40 @@ export default function App() {
     )
   }
 
+  // Move a card so it ends up at `toIndex` in `toColumnId`. The screen updates
+  // straight away; if the server rejects the move, the card goes back.
+  async function moveCard(cardId: string, toColumnId: string, toIndex: number) {
+    if (state.status !== 'ready') return
+    const columns = state.board.columns
+    const original = findCard(columns, cardId)
+    const target = columns.find((c) => c.id === toColumnId)
+    if (!original || !target) return
+
+    // Dropped back where it started: nothing to save.
+    if (original.columnId === toColumnId && target.cards.findIndex((c) => c.id === cardId) === toIndex)
+      return
+
+    // The neighbours it lands between, ignoring the card itself.
+    const others = target.cards.filter((c) => c.id !== cardId)
+    const position = positionBetween(others[toIndex - 1]?.position, others[toIndex]?.position)
+    const moved = { ...original, columnId: toColumnId, position }
+
+    setMoveError(null)
+    updateColumns((cols) => putCard(cols, moved))
+    try {
+      await api.moveCard(cardId, toColumnId, position)
+    } catch (err) {
+      updateColumns((cols) => putCard(cols, original))
+      setMoveError(err instanceof Error ? err.message : 'Something went wrong')
+    }
+  }
+
+  function updateColumns(change: (columns: ColumnType[]) => ColumnType[]) {
+    setState((s) =>
+      s.status === 'ready' ? { ...s, board: { ...s.board, columns: change(s.board.columns) } } : s,
+    )
+  }
+
   return (
     <main className="min-h-screen bg-slate-100">
       {state.status === 'loading' && <p className="p-6 text-slate-500">Loading…</p>}
@@ -97,8 +133,22 @@ export default function App() {
 
       {state.status === 'empty' && <CreateFirstBoard onCreate={createFirstBoard} />}
 
+      {state.status === 'ready' && moveError && (
+        <div role="alert" className="flex items-center gap-3 bg-red-50 px-6 py-2 text-sm text-red-700">
+          <span>Couldn't move the card: {moveError}</span>
+          <button onClick={() => setMoveError(null)} className="underline hover:no-underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {state.status === 'ready' && (
-        <Board board={state.board} onAddColumn={addColumn} onAddCard={addCard} />
+        <Board
+          board={state.board}
+          onAddColumn={addColumn}
+          onAddCard={addCard}
+          onMoveCard={moveCard}
+        />
       )}
     </main>
   )

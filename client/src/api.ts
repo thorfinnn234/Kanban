@@ -53,3 +53,10 @@ export function createCard(columnId: string, title: string) {
     body: JSON.stringify({ title }),
   })
 }
+
+export function moveCard(cardId: string, toColumnId: string, position: number) {
+  return request<Card>(`/cards/${cardId}/move`, {
+    method: 'PATCH',
+    body: JSON.stringify({ toColumnId, position }),
+  })
+}
